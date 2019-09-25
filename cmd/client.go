@@ -65,5 +65,5 @@ var clientCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(clientCmd)
 	clientCmd.Flags().StringVarP(&server, "server", "s", "", "address of server, host:port")
-	clientCmd.Flags().StringVarP(&flowcontrol, "flowcontrol", "b", "signal", "address to bind to, host:port")
+	clientCmd.Flags().StringVarP(&flowcontrol, "flowcontrol", "f", "signal", "flow control strategy")
 }
