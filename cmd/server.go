@@ -36,15 +36,19 @@ var serverCmd = &cobra.Command{
 				if err != nil {
 					panic(err)
 				}
-				stream, err := s.AcceptStream()
-				if err != nil {
-					panic(err)
+				for {
+					stream, err := s.AcceptStream()
+					go func() {
+						if err != nil {
+							panic(err)
+						}
+						if err != nil {
+							panic(err)
+						}
+						n, err := io.Copy(ioutil.Discard, stream)
+						log.Println(err, n)
+					}()
 				}
-				if err != nil {
-					panic(err)
-				}
-				n, err := io.Copy(ioutil.Discard, stream)
-				log.Println(err, n)
 			}()
 		}
 	},

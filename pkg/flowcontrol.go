@@ -2,55 +2,69 @@ package pkg
 
 import (
 	"github.com/pion/sctp"
+	"io"
 	"log"
 	"sync/atomic"
-	"time"
 )
 
 type FlowControlledStream struct {
 	stream                     *sctp.Stream
 	bufferedAmountLowThreshold uint64
 	maxBufferedAmount          uint64
-	bufferedAmountLowSignal    chan struct{}
 	totalBytesReceived         uint64
 	totalBytesSent             uint64
 }
 
+type FlowControlledStreamSignal struct {
+	FlowControlledStream
+	bufferedAmountLowSignal chan struct{}
+}
+
+type FlowControlledStreamDrain struct {
+	FlowControlledStream
+	queue chan []byte
+}
+
 // NewFlowControlledStream --
-func NewFlowControlledStream(stream *sctp.Stream, bufferedAmountLowThreshold, maxBufferedAmount uint64) *FlowControlledStream {
-	fcdc := &FlowControlledStream{
+func NewFlowControlledStream(flowControlType string, stream *sctp.Stream, bufferedAmountLowThreshold, maxBufferedAmount, queueSize uint64) io.ReadWriter {
+	var rw io.ReadWriter
+
+	stream.SetBufferedAmountLowThreshold(bufferedAmountLowThreshold)
+	fcs := FlowControlledStream{
 		stream:                     stream,
 		bufferedAmountLowThreshold: bufferedAmountLowThreshold,
 		maxBufferedAmount:          maxBufferedAmount,
-		bufferedAmountLowSignal:    make(chan struct{}, 1),
 	}
-	stream.SetBufferedAmountLowThreshold(bufferedAmountLowThreshold)
-	stream.OnBufferedAmountLow(func() {
-		go func() { fcdc.bufferedAmountLowSignal <- struct{}{} }()
-	})
-	go func() {
-		since := time.Now()
 
-		// Start printing out the observed throughput
-		for range time.NewTicker(1000 * time.Millisecond).C {
-			rbps := float64(atomic.LoadUint64(&fcdc.totalBytesReceived)*8) / time.Since(since).Seconds()
-			log.Printf("RecvThroughPut: %.03f Mbps, totalBytesReceived: %d", rbps/1024/1024, fcdc.totalBytesReceived)
-			wbps := float64(atomic.LoadUint64(&fcdc.totalBytesSent)*8) / time.Since(since).Seconds()
-			log.Printf("SendThroughPut: %.03f Mbps, totalBytesSent: %d", wbps/1024/1024, fcdc.totalBytesSent)
+	switch flowControlType {
+	case "signal":
+		fcss := &FlowControlledStreamSignal{
+			FlowControlledStream:    fcs,
+			bufferedAmountLowSignal: make(chan struct{}, 1024),
 		}
-	}()
+		stream.OnBufferedAmountLow(func() {
+			fcss.bufferedAmountLowSignal <- struct{}{}
+		})
+		rw = fcss
+	case "drain":
+		fcsd := &FlowControlledStreamDrain{
+			FlowControlledStream: fcs,
+			queue:                make(chan []byte, queueSize),
+		}
+		stream.OnBufferedAmountLow(func() {
+			go fcsd.DrainQueue()
+		})
+		rw = fcsd
+	}
 
-	return fcdc
+	return rw
 }
 
-func (fcdc *FlowControlledStream) Read(p []byte) (int, error) {
-	cnt, err := fcdc.stream.Read(p)
-	atomic.AddUint64(&fcdc.totalBytesReceived, uint64(cnt))
-	return cnt, err
+func (fcdc *FlowControlledStreamSignal) Read(p []byte) (int, error) {
+	return fcdc.stream.Read(p)
 }
 
-func (fcdc *FlowControlledStream) Write(p []byte) (int, error) {
-
+func (fcdc *FlowControlledStreamSignal) Write(p []byte) (int, error) {
 	if fcdc.stream.BufferedAmount() > fcdc.maxBufferedAmount {
 		<-fcdc.bufferedAmountLowSignal
 	}
@@ -61,4 +75,41 @@ func (fcdc *FlowControlledStream) Write(p []byte) (int, error) {
 	}
 	atomic.AddUint64(&fcdc.totalBytesSent, uint64(cnt))
 	return cnt, err
+}
+
+func (fcdc *FlowControlledStreamDrain) Read(p []byte) (int, error) {
+	n, err := fcdc.stream.Read(p)
+	atomic.AddUint64(&fcdc.totalBytesReceived, uint64(n))
+	return n, err
+}
+
+func (fcdc *FlowControlledStreamDrain) Write(p []byte) (int, error) {
+	fcdc.queue <- p
+	if _, err := fcdc.DrainQueue(); err != nil {
+		return 0, err
+	}
+	return len(p), nil
+}
+
+func (fcdc *FlowControlledStreamDrain) DrainQueue() (int, error) {
+	var bytesSent int
+	for {
+		if len(fcdc.queue) == 0 {
+			break
+		}
+
+		if fcdc.stream.BufferedAmount() >= fcdc.maxBufferedAmount {
+			break
+		}
+
+		p := <-fcdc.queue
+		b, err := fcdc.stream.Write(p)
+		if err != nil {
+			log.Println("ERROR", err)
+			return bytesSent, err
+		}
+
+		bytesSent += b
+	}
+	return bytesSent, nil
 }

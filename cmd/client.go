@@ -10,13 +10,26 @@ import (
 	"github.com/pion/sctp"
 	"github.com/spf13/cobra"
 	"io"
+	"log"
 	"math/rand"
 	"net"
+	"time"
 )
 
 var (
-	server string
+	server      string
+	flowcontrol string
 )
+
+func PrintStatistics(association *sctp.Association) {
+	since := time.Now()
+	for range time.NewTicker(1000 * time.Millisecond).C {
+		rbps := float64(association.BytesReceived()*8) / time.Since(since).Seconds()
+		log.Printf("Received Mbps: %.03f, totalBytesReceived: %d", rbps/1024/1024, association.BytesReceived())
+		sbps := float64(association.BytesSent()*8) / time.Since(since).Seconds()
+		log.Printf("Sent Mbps: %.03f, totalBytesSent: %d", sbps/1024/1024, association.BytesSent())
+	}
+}
 
 // clientCmd represents the client command
 var clientCmd = &cobra.Command{
@@ -26,25 +39,31 @@ var clientCmd = &cobra.Command{
 		if err != nil {
 			panic(err)
 		}
+		log.Println("Dialed conn")
 		sctpClient, err := sctp.Client(sctp.Config{
 			NetConn:       c,
 			LoggerFactory: logging.NewDefaultLoggerFactory(),
 		})
+		log.Println("Dialed sctp")
 		if err != nil {
 			panic(err)
 		}
-		stream, err := sctpClient.OpenStream(123, sctp.PayloadTypeWebRTCBinary)
+		go PrintStatistics(sctpClient)
+		stream, err := sctpClient.OpenStream(0, sctp.PayloadTypeWebRTCBinary)
 		if err != nil {
 			panic(err)
 		}
+		log.Println("Opened stream")
 		src := rand.NewSource(int64(123))
 		r := rand.New(src)
-		fc := pkg.NewFlowControlledStream(stream, 512*1024, 1024*1024)
-		io.Copy(fc, r)
+		fc := pkg.NewFlowControlledStream(flowcontrol, stream, 512*1024, 1024*10240, 0)
+		_, err = io.Copy(fc, r)
+		panic(err)
 	},
 }
 
 func init() {
 	rootCmd.AddCommand(clientCmd)
 	clientCmd.Flags().StringVarP(&server, "server", "s", "", "address of server, host:port")
+	clientCmd.Flags().StringVarP(&flowcontrol, "flowcontrol", "b", "signal", "address to bind to, host:port")
 }
