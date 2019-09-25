@@ -17,9 +17,11 @@ import (
 )
 
 var (
-	server      string
-	flowcontrol string
-	queueSize   uint64
+	server             string
+	flowcontrol        string
+	queueSize          uint64
+	bufferLowThreshold uint64
+	maxBufferAmount    uint64
 )
 
 func PrintStatistics(association *sctp.Association) {
@@ -57,7 +59,7 @@ var clientCmd = &cobra.Command{
 		log.Println("Opened stream")
 		src := rand.NewSource(int64(123))
 		r := rand.New(src)
-		fc := pkg.NewFlowControlledStream(flowcontrol, stream, 512*1024, 1024*10240, queueSize)
+		fc := pkg.NewFlowControlledStream(flowcontrol, stream, bufferLowThreshold, maxBufferAmount, queueSize)
 		_, err = io.Copy(fc, r)
 		panic(err)
 	},
@@ -68,4 +70,6 @@ func init() {
 	clientCmd.Flags().StringVarP(&server, "server", "s", "", "address of server, host:port")
 	clientCmd.Flags().StringVarP(&flowcontrol, "flowcontrol", "f", "signal", "flow control strategy")
 	clientCmd.Flags().Uint64VarP(&queueSize, "queue-size", "q", 100, "queue size for drain flow control strategy")
+	clientCmd.Flags().Uint64VarP(&bufferLowThreshold, "buffer-low-threshold", "l", 512*1024, "buffer low threshold")
+	clientCmd.Flags().Uint64VarP(&maxBufferAmount, "max-buffer-amount", "m", 1024*1024, "max buffer amount")
 }
