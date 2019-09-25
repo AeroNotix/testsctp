@@ -37,6 +37,8 @@ func NewFlowControlledStream(flowControlType string, stream *sctp.Stream, buffer
 	}
 
 	switch flowControlType {
+	case "none":
+		rw = fcs
 	case "signal":
 		fcss := &FlowControlledStreamSignal{
 			FlowControlledStream:    fcs,
@@ -58,6 +60,14 @@ func NewFlowControlledStream(flowControlType string, stream *sctp.Stream, buffer
 	}
 
 	return rw
+}
+
+func (fcdc FlowControlledStream) Read(p []byte) (int, error) {
+	return fcdc.stream.Read(p)
+}
+
+func (fcdc FlowControlledStream) Write(p []byte) (int, error) {
+	return fcdc.stream.Write(p)
 }
 
 func (fcdc *FlowControlledStreamSignal) Read(p []byte) (int, error) {
