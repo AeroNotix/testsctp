@@ -19,6 +19,7 @@ import (
 var (
 	server      string
 	flowcontrol string
+	queueSize   uint64
 )
 
 func PrintStatistics(association *sctp.Association) {
@@ -56,7 +57,7 @@ var clientCmd = &cobra.Command{
 		log.Println("Opened stream")
 		src := rand.NewSource(int64(123))
 		r := rand.New(src)
-		fc := pkg.NewFlowControlledStream(flowcontrol, stream, 512*1024, 1024*10240, 0)
+		fc := pkg.NewFlowControlledStream(flowcontrol, stream, 512*1024, 1024*10240, queueSize)
 		_, err = io.Copy(fc, r)
 		panic(err)
 	},
@@ -66,4 +67,5 @@ func init() {
 	rootCmd.AddCommand(clientCmd)
 	clientCmd.Flags().StringVarP(&server, "server", "s", "", "address of server, host:port")
 	clientCmd.Flags().StringVarP(&flowcontrol, "flowcontrol", "f", "signal", "flow control strategy")
+	clientCmd.Flags().Uint64VarP(&queueSize, "queue-size", "q", 100, "queue size for drain flow control strategy")
 }
