@@ -4,15 +4,12 @@ import (
 	"github.com/pion/sctp"
 	"io"
 	"log"
-	"sync/atomic"
 )
 
 type FlowControlledStream struct {
 	stream                     *sctp.Stream
 	bufferedAmountLowThreshold uint64
 	maxBufferedAmount          uint64
-	totalBytesReceived         uint64
-	totalBytesSent             uint64
 }
 
 type FlowControlledStreamSignal struct {
@@ -23,6 +20,10 @@ type FlowControlledStreamSignal struct {
 type FlowControlledStreamDrain struct {
 	FlowControlledStream
 	queue chan []byte
+}
+
+type FlowControlledStreamSpinCPU struct {
+	FlowControlledStream
 }
 
 // NewFlowControlledStream --
@@ -57,6 +58,11 @@ func NewFlowControlledStream(flowControlType string, stream *sctp.Stream, buffer
 			go fcsd.DrainQueue()
 		})
 		rw = fcsd
+	case "spin-cpu":
+		fcsscpu := &FlowControlledStreamSpinCPU{
+			FlowControlledStream: fcs,
+		}
+		rw = fcsscpu
 	}
 
 	return rw
@@ -78,19 +84,11 @@ func (fcdc *FlowControlledStreamSignal) Write(p []byte) (int, error) {
 	if fcdc.stream.BufferedAmount() > fcdc.maxBufferedAmount {
 		<-fcdc.bufferedAmountLowSignal
 	}
-
-	cnt, err := fcdc.stream.Write(p)
-	if err != nil {
-		return cnt, err
-	}
-	atomic.AddUint64(&fcdc.totalBytesSent, uint64(cnt))
-	return cnt, err
+	return fcdc.stream.Write(p)
 }
 
 func (fcdc *FlowControlledStreamDrain) Read(p []byte) (int, error) {
-	n, err := fcdc.stream.Read(p)
-	atomic.AddUint64(&fcdc.totalBytesReceived, uint64(n))
-	return n, err
+	return fcdc.stream.Read(p)
 }
 
 func (fcdc *FlowControlledStreamDrain) Write(p []byte) (int, error) {
@@ -122,4 +120,14 @@ func (fcdc *FlowControlledStreamDrain) DrainQueue() (int, error) {
 		bytesSent += b
 	}
 	return bytesSent, nil
+}
+
+func (fcdc *FlowControlledStreamSpinCPU) Read(p []byte) (int, error) {
+	return fcdc.stream.Read(p)
+}
+
+func (fcsscpu *FlowControlledStreamSpinCPU) Write(p []byte) (int, error) {
+	for fcsscpu.stream.BufferedAmount() > fcsscpu.maxBufferedAmount {
+	}
+	return fcsscpu.stream.Write(p)
 }
