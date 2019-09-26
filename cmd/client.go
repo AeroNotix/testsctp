@@ -38,6 +38,8 @@ func PrintStatistics(association *sctp.Association) {
 var clientCmd = &cobra.Command{
 	Use: "client",
 	Run: func(cmd *cobra.Command, args []string) {
+		log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds | log.Llongfile)
+
 		raddr, err := net.ResolveUDPAddr("udp", "127.0.0.1:10001")
 		if err != nil {
 			panic(err)
@@ -46,7 +48,7 @@ var clientCmd = &cobra.Command{
 		if err != nil {
 			panic(err)
 		}
-		c, err := net.DialUDP("udp", laddr, raddr)
+		c, err := net.DialUDP("udp4", laddr, raddr)
 		if err != nil {
 			panic(err)
 		}
