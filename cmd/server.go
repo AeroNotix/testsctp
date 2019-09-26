@@ -10,45 +10,41 @@ import (
 	"net"
 )
 
-var (
-	bind string
-)
-
 // serverCmd represents the server command
 var serverCmd = &cobra.Command{
 	Use: "server",
 	Run: func(cmd *cobra.Command, args []string) {
-		l, err := net.Listen("tcp", bind)
+		raddr, err := net.ResolveUDPAddr("udp4", "127.0.0.1:10001")
+		if err != nil {
+			panic(err)
+		}
+		laddr, err := net.ResolveUDPAddr("udp4", "127.0.0.1:10002")
+		if err != nil {
+			panic(err)
+		}
+		conn, err := net.DialUDP("udp4", raddr, laddr)
 		if err != nil {
 			panic(err)
 		}
 
+		s, err := sctp.Server(sctp.Config{
+			NetConn:       conn,
+			LoggerFactory: logging.NewDefaultLoggerFactory(),
+		})
+		if err != nil {
+			panic(err)
+		}
 		for {
-			conn, err := l.Accept()
+			stream, err := s.AcceptStream()
 			if err != nil {
 				panic(err)
 			}
 			go func() {
-				s, err := sctp.Server(sctp.Config{
-					NetConn:       conn,
-					LoggerFactory: logging.NewDefaultLoggerFactory(),
-				})
 				if err != nil {
 					panic(err)
 				}
-				for {
-					stream, err := s.AcceptStream()
-					if err != nil {
-						panic(err)
-					}
-					go func() {
-						if err != nil {
-							panic(err)
-						}
-						n, err := io.Copy(ioutil.Discard, stream)
-						log.Println(err, n)
-					}()
-				}
+				n, err := io.Copy(ioutil.Discard, stream)
+				log.Println(err, n)
 			}()
 		}
 	},
@@ -56,5 +52,4 @@ var serverCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(serverCmd)
-	serverCmd.Flags().StringVarP(&bind, "bind", "b", "", "address to bind to, host:port")
 }
